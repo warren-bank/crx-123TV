@@ -1,0 +1,1 @@
+javascript:document.head.innerHTML='';document.body.style.margin='0';document.body.innerHTML='<div%20style="height:'+(document.documentElement.clientHeight-4)+'px;">'+document.querySelector('.video-player-page iframe').outerHTML+'</div>';void(0)
