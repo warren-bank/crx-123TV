@@ -1,9 +1,9 @@
-### [123TV Live](https://github.com/warren-bank/crx-123TV-Live)
+### [123TV](https://github.com/warren-bank/crx-123TV)
 
 #### Summary:
 
 Chromium browser extension:
-* works on pages that are hosted at: [`123tv.live/watch/*`](http://123tv.live/)
+* works on pages that are hosted at: [`123tvgo.com/watch/*`](http://123tvgo.com/)
 
 #### UI:
 

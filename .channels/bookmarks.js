@@ -1,6 +1,6 @@
-// http://123tv.live/category/united-states-usa/
-// http://123tv.live/category/united-kingdom-uk/
-// http://123tv.live/category/france-fr/
+// http://123tvgo.com/category/united-states-usa/
+// http://123tvgo.com/category/united-kingdom-uk/
+// http://123tvgo.com/category/france-fr/
 
 jQuery(document).ready(function($){
   let data = []
