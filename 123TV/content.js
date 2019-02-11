@@ -56,16 +56,6 @@ var get_hash_code = function(str){
   return Math.abs(hash)
 }
 
-var inject_options = function(){
-  return new Promise((resolve, reject) => {
-    chrome.storage.sync.get(['open_in_webcast_reloaded'], (result) => {
-      var _function = `function(){window.open_in_webcast_reloaded = ${result['open_in_webcast_reloaded']}}`
-      inject_function(_function)
-      resolve()
-    })
-  })
-}
-
 var inject_function = function(_function){
   var inline, script, head
 
@@ -78,6 +68,16 @@ var inject_function = function(_function){
 
   head = document.head
   head.appendChild(script)
+}
+
+var inject_options = function(){
+  return new Promise((resolve, reject) => {
+    chrome.storage.sync.get(['open_in_webcast_reloaded'], (result) => {
+      var _function = `function(){window.open_in_webcast_reloaded = ${result['open_in_webcast_reloaded']}}`
+      inject_function(_function)
+      resolve()
+    })
+  })
 }
 
 var inject_options_then_function = function(_function){
