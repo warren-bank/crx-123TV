@@ -1,6 +1,6 @@
 {
   "name": "123TV",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Removes clutter and reduces CPU load.",
   "content_scripts": [{
     "matches": [

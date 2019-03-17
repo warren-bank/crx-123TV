@@ -27,10 +27,17 @@ var payload = function(){
       let hls_url = jwplayer().getPlaylistItem().sources[0].file
       if (!hls_url) throw ''
 
-      let encoded_hls_url       = encodeURIComponent(encodeURIComponent(btoa(hls_url)))
-    //let webcast_reloaded_base = 'https://warren-bank.github.io/crx-webcast-reloaded/external_website/index.html#/watch/'
-      let webcast_reloaded_base = 'http://gitcdn.link/cdn/warren-bank/crx-webcast-reloaded/gh-pages/external_website/index.html#/watch/'
-      let webcast_reloaded_url  = webcast_reloaded_base + encoded_hls_url
+      let webcast_reloaded_base
+      if (window.filter_through_hls_proxy) {
+      //webcast_reloaded_base  = 'https://warren-bank.github.io/crx-webcast-reloaded/external_website/proxy.html#/watch/'
+        webcast_reloaded_base  = 'http://gitcdn.link/cdn/warren-bank/crx-webcast-reloaded/gh-pages/external_website/proxy.html#/watch/'
+      }
+      else {
+      //webcast_reloaded_base  = 'https://warren-bank.github.io/crx-webcast-reloaded/external_website/index.html#/watch/'
+        webcast_reloaded_base  = 'http://gitcdn.link/cdn/warren-bank/crx-webcast-reloaded/gh-pages/external_website/index.html#/watch/'
+      }
+      let encoded_hls_url      = encodeURIComponent(encodeURIComponent(btoa(hls_url)))
+      let webcast_reloaded_url = webcast_reloaded_base + encoded_hls_url
 
       window.location = webcast_reloaded_url
     }
@@ -72,8 +79,13 @@ var inject_function = function(_function){
 
 var inject_options = function(){
   return new Promise((resolve, reject) => {
-    chrome.storage.sync.get(['open_in_webcast_reloaded'], (result) => {
-      var _function = `function(){window.open_in_webcast_reloaded = ${result['open_in_webcast_reloaded']}}`
+    chrome.storage.sync.get(['open_in_webcast_reloaded','filter_through_hls_proxy'], (items) => {
+      var _function = ''
+      _function += 'function(){'
+      for (var key in items){
+        _function += `window['${key}'] = ${items[key]};`
+      }
+      _function += '}'
       inject_function(_function)
       resolve()
     })
