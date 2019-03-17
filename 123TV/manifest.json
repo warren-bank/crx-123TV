@@ -1,9 +1,13 @@
 {
   "name": "123TV",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Removes clutter and reduces CPU load.",
   "content_scripts": [{
-    "matches": ["*://123tvgo.com/watch/*"],
+    "matches": [
+      "*://123tv.live/watch/*",
+      "*://123tvgo.com/watch/*",
+      "*://123tvnow.com/watch/*"
+    ],
     "all_frames": true,
     "run_at": "document_start",
     "js": ["content.js"]

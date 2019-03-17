@@ -3,7 +3,7 @@
 #### Summary:
 
 Chromium browser extension:
-* works on pages that are hosted at: [`123tvgo.com/watch/*`](http://123tvgo.com/)
+* works on pages that are hosted at: [`123tvnow.com/watch/*`](http://123tvnow.com/)
 
 #### UI:
 
