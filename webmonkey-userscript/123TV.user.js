@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TV123
 // @description  Watch videos in external player.
-// @version      2.0.0
+// @version      3.0.0
 // @match        *://123tvnow.com/watch/*
 // @icon         http://123tvnow.com/wp-content/themes/123tv_v2/img/icon.png
 // @run-at       document-end
@@ -13,17 +13,6 @@
 // @author       Warren Bank
 // @copyright    Warren Bank
 // ==/UserScript==
-
-// =============================================================================
-
-var get_hls_url = function() {
-  var hls_url = null
-  try {
-    hls_url = jwplayer().getPlaylistItem().sources[0].file
-  }
-  catch(e){}
-  return hls_url || get_hls_url_fallback()
-}
 
 // =============================================================================
 /*
@@ -40,9 +29,20 @@ var get_hls_url = function() {
  *   var _0x4fce28=E['d'](_0x49acb3('dea9501862'),_0xdea76('81e03c2'));
  * result:
  *   _0x4fce28 === 'http://get.123tv.live/channel/6f315272796a396432693734396130494d35776653413d3d/23/abc.m3u8'
+ * however:
+ *   - video players refuse to play this manifest
+ *   - even ExoAirPlayer doesn't play it, and that's when the Referer header is properly configured
+ * test:
+ *   curl -H 'Referer: http://123tvnow.com/watch/abc/' 'http://get.123tv.live/channel/6f315272796a396432693734396130494d35776653413d3d/23/abc.m3u8'
+ * result:
+ *   'http://hls.123tv.live/ch/nPABQAnsjNp8TzV4YAVMGw/1599132770/abc.m3u8'
+ *
+ * Consequently, after the javascript is evaluated and the 1st HLS URL is obtained..
+ * need to make a second XHR call to resolve the 2nd HSL URL that is able to be played by external video players.
+ * Unfortunately, ES5 means that the code will need to be restructured to use a callback.. since Promise and async/await are not available.
  */
 
-var get_hls_url_fallback = function() {
+var get_hls_url = function(cb) {
   var hls_url = null
   var patterns = {
     extraction_start: "$(document).ready(function(){var post_id=parseInt($('#video-id').val());",
@@ -97,7 +97,26 @@ var get_hls_url_fallback = function() {
     }
   }
   catch(e){}
-  return hls_url
+  resolve_hls_url(hls_url, cb)
+}
+
+var resolve_hls_url = function(url, cb) {
+  if (!url || (typeof url !== 'string')) {
+    cb(null)
+    return
+  }
+
+  var xhr = new XMLHttpRequest()
+  xhr.open('GET', url, true)
+  xhr.onload = function() {
+    cb(
+      ((xhr.status >= 200) && (xhr.status < 300) && (xhr.responseText))
+        ? xhr.responseText
+        : url
+    )
+    xhr.abort()
+  }
+  xhr.send()
 }
 
 // =============================================================================
@@ -115,50 +134,55 @@ var get_referer_url = function() {
 
 // =============================================================================
 
-var process_page = function(show_error) {
-  var hls_url = get_hls_url()
+var process_page = function(show_error, cb) {
+  get_hls_url(function(hls_url){
+    if (hls_url) {
+      var extras = ['referUrl', get_referer_url()]
 
-  if (hls_url) {
-    var extras = ['referUrl', get_referer_url()]
+      var args = [
+        'android.intent.action.VIEW',  /* action */
+        hls_url,                       /* data   */
+        'application/x-mpegurl'        /* type   */
+      ]
 
-    var args = [
-      'android.intent.action.VIEW',  /* action */
-      hls_url,                       /* data   */
-      'application/x-mpegurl'        /* type   */
-    ]
+      for (var i=0; i < extras.length; i++) {
+        args.push(extras[i])
+      }
 
-    for (var i=0; i < extras.length; i++) {
-      args.push(extras[i])
+      GM_startIntent.apply(this, args)
+    }
+    else if (show_error) {
+      GM_toastShort('video not found')
     }
 
-    GM_startIntent.apply(this, args)
-  }
-  else if (show_error) {
-    GM_toastShort('video not found')
-  }
-
-  return (!!hls_url)
+    cb(!!hls_url)
+  })
 }
 
 // =============================================================================
 
 var init = function() {
-  var count, timer
+  process_page(false, function(success){
+    var count, timer
 
-  if (!process_page(false)) {
-    count = 15
-    timer = window.setInterval(
-      function() {
-        if (count <= 1) window.clearInterval(timer)
-        if (count <= 0) return
-        if (process_page((count === 1)))
-          count = 0
-        else
-          count--
-      },
-      1000
-    )
-  }
+    if (!success) {
+      count = 15
+      timer = window.setInterval(
+        function() {
+          if (count <= 1) window.clearInterval(timer)
+          if (count <= 0) return
+
+          process_page((count === 1), function(success){
+            if (success)
+              count = 0
+            else
+              count--
+          })
+        },
+        1000
+      )
+    }
+  })
 }
 
 // =============================================================================
