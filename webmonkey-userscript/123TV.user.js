@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         TV123
 // @description  Watch videos in external player.
-// @version      1.0.0
+// @version      2.0.0
 // @match        *://123tvnow.com/watch/*
 // @icon         http://123tvnow.com/wp-content/themes/123tv_v2/img/icon.png
-// @run-at       document-start
+// @run-at       document-end
 // @homepage     https://github.com/warren-bank/crx-123TV/tree/webmonkey-userscript/es5
 // @supportURL   https://github.com/warren-bank/crx-123TV/issues
 // @downloadURL  https://github.com/warren-bank/crx-123TV/raw/webmonkey-userscript/es5/webmonkey-userscript/123TV.user.js
@@ -22,6 +22,81 @@ var get_hls_url = function() {
     hls_url = jwplayer().getPlaylistItem().sources[0].file
   }
   catch(e){}
+  return hls_url || get_hls_url_fallback()
+}
+
+// =============================================================================
+/*
+ * This ES5 variation is intented to be run in older versions of Android (ie: WebKit, Chrome 30).
+ * In this context, JW Player fails to initialize.. and the normal method to retrieve the HLS video URL from JW Player also fails.
+ * A fallback strategy is to extract and evaluate javascript from the page source.
+ *
+ * example:
+ * ========
+ * page = view-source:http://123tvnow.com/watch/abc/
+ * code:
+ *   var _0x49acb3=_0x3b07f1=>{_0x3b07f1=['eyJjaXBoZXJ0ZXh0IjoiRENtQ0dITWdGaUpRbThJWFFRaUVBTVlTSTFrSlJ1bzJiSk1ab0VKTGpBWFlwVlJqRUpGc2YwMHpKMllVUDJ3UWdQNnlsVnNpcFZNQTBzU1o1cmpzNzVPZXU3c25JU00wTFR5WHJXeG8xMjFubkZaTVwvWGk0ZkY1Q09RUkFLWVJ3IiwiaXYiOiJjYWVlMTAzOTlkZDdlNTAxY2IxOTM3MDA4NGQzYW','E3ZiIsInNhbHQiOiI1NjViZTA3YzhiMTNmMjczOTQ0MzQxNDY1NDY0OThjYzJhM2ZmODdiNWY1MjFhMmM5MDczNzY5OGE4ZmQyNzU2NmZjYTdlNzc1OTVkMzM3YTBiZmM0ZTM5OWVmOGFkZTAzOGY4ZDQ3OTIxNWZhNjc1MDE2YWY2NGRkODY1MWE2YmEyNjZlOTE4MWFlZjM0NWEwYjllYmYyNzY1NTg1OTcyMzkzMTRjZWFj','ZDRkYTY3YjJlMmMzYjE4MzdlNWI3Y2E3ZDczMDM0YzA4NThkM2M0MzRhMjNmM2Y5YTRmMzdiMWJkMGE0OWQ2N2QzNjIzYzIzNGRlNWZiNTY4ZjA2MzY5M2MxOWMwZWFkYjdhNjhhZGJkNTk3YjBiZWRjMDA3MWU5Nzk3ZjY5YWQ0YWYwYTI3MjkzODBhZDllMjI4ZmM5Y2M0ZTkzZDE4ODkzMDg5MDUyNmI0ZjBjOTk5MzllNT','U4YmE3NjYwNzA1OWQyZTdmMmUxNGIxZjEyNTY1Zjg0MzRhYjZkMjA4Nzk5YzYyNTZlNWMyNjc3ZTE3OTFiM2MwNzc1MGQ0MTE2NmU3MWNhMWY5YmU3ZGQ1ZTg4NTJjYmNiMTVhMTU2MTNiNzAxM2ZiZTQ2ODk3NTQwMzQxNTdjYjNkMzAyZWQ2N2YyMzJkMGMxNzA3YTFhNmU5N2M5OWViZiIsIml0ZXJhdGlvbnMiOjk5OX0=',''];return _0x3b07f1.join('');}
+ *   var _0xdea76=_0xd93475=>{_0x34a189=[101,57,98,51];_0x769cd4=[102,52,100,99];_0xcd4a=[54,49,56,50];_0x685a2e=[55,48,53,97];_0x34a189=_0x34a189.concat(_0x769cd4);_0x34a189=_0x34a189.concat(_0xcd4a);_0xd93475=_0x34a189.concat(_0x685a2e);return _0xd93475.map(e=>String.fromCharCode(e)).reverse().join('');}
+ *   var _0x4fce28=E['d'](_0x49acb3('dea9501862'),_0xdea76('81e03c2'));
+ * result:
+ *   _0x4fce28 === 'http://get.123tv.live/channel/6f315272796a396432693734396130494d35776653413d3d/23/abc.m3u8'
+ */
+
+var get_hls_url_fallback = function() {
+  var hls_url = null
+  var patterns = {
+    extraction_start: "$(document).ready(function(){var post_id=parseInt($('#video-id').val());",
+    extraction_stop:  ";if(",
+    replacements: [
+      {
+        s: /var [^=]+=[^=]+=>{var [^=]+=(E\['d'\])/,
+        r: 'return $1'
+      },
+      {
+        // the purpose of this replacement is to convert ES6 functions to ES5 syntax
+        s: /([^=]+)=>{/g,
+        r: 'function($1){'
+      },
+      {
+        // the purpose of this replacement is to convert ES6 functions to ES5 syntax
+        s: 'e=>String.fromCharCode(e)',
+        r: 'function(e){return String.fromCharCode(e);}'
+      }
+    ]
+  }
+  try {
+    var scripts, script, index, sr
+    scripts = document.querySelectorAll('script')
+    scripts = Array.prototype.slice.call(scripts)
+
+    for (var i=0; !hls_url && (i < scripts.length); i++) {
+      script = scripts[i].innerText
+
+      index = script.indexOf(patterns.extraction_start)
+      if (index < 0) continue
+      script = script.substring(index + patterns.extraction_start.length)
+
+      index = script.indexOf(patterns.extraction_stop)
+      if (index < 0) continue
+      script = script.substring(0, index)
+
+      for (var j=0; j < patterns.replacements.length; j++) {
+        sr = patterns.replacements[j]
+        script = script.replace(sr.s, sr.r)
+      }
+
+      try {
+        hls_url = eval('(function(){' + script + '})()')
+
+        if (typeof hls_url !== 'string')    throw ''
+        if (hls_url.indexOf('m3u8') === -1) throw ''
+      }
+      catch(e) {
+        hls_url = null
+      }
+    }
+  }
+  catch(e){}
   return hls_url
 }
 
@@ -30,10 +105,10 @@ var get_hls_url = function() {
 var get_referer_url = function() {
   var referer_url
   try {
-    referer_url = unsafeWindow.top.location.href
+    referer_url = window.top.location.href
   }
   catch(e) {
-    referer_url = unsafeWindow.location.href
+    referer_url = window.location.href
   }
   return referer_url
 }
@@ -67,16 +142,25 @@ var process_page = function(show_error) {
 
 // =============================================================================
 
-var count = 15
+var init = function() {
+  var count, timer
 
-var timer = unsafeWindow.setInterval(
-  function() {
-    if (count <= 1) unsafeWindow.clearInterval(timer)
-    if (count <= 0) return
-    if (process_page((count === 1)))
-      count = 0
-    else
-      count--
-  },
-  1000
-)
+  if (!process_page(false)) {
+    count = 15
+    timer = window.setInterval(
+      function() {
+        if (count <= 1) window.clearInterval(timer)
+        if (count <= 0) return
+        if (process_page((count === 1)))
+          count = 0
+        else
+          count--
+      },
+      1000
+    )
+  }
+}
+
+// =============================================================================
+
+init()
