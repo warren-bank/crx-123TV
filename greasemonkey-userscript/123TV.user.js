@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         123TV
 // @description  Removes clutter to reduce CPU load. Can transfer video stream to alternate video players: WebCast-Reloaded, ExoAirPlayer.
-// @version      0.2.1
+// @version      0.2.2
 // @match        *://123tvnow.com/watch/*
 // @icon         http://123tvnow.com/wp-content/themes/123tv_v2/img/icon.png
 // @run-at       document-idle
@@ -18,6 +18,8 @@
 
 var user_options = {
   "script_injection_delay_ms":    500,
+  "videoplayer_poll_interval_ms": 500,
+  "videoplayer_poll_timeout_ms":  10000,
   "redirect_to_webcast_reloaded": true,
   "force_http":                   true,
   "force_https":                  false
@@ -81,22 +83,46 @@ var payload = function(){
     }
   }
 
-  const hls_url = get_video_src()
+  const init = function() {
+    const hls_url = get_video_src()
 
-  if (hls_url && window.redirect_to_webcast_reloaded) {
-    // transfer video stream
+    if (hls_url && window.redirect_to_webcast_reloaded) {
+      // transfer video stream
 
-    redirect_to_url(get_webcast_reloaded_url(hls_url))
+      redirect_to_url(get_webcast_reloaded_url(hls_url))
+    }
+    else {
+      // tidy DOM
+
+      const iframe_html = document.querySelector('.video-player-page iframe').outerHTML
+
+      document.head.innerHTML    = ''
+      document.body.style.margin = '0'
+      document.body.innerHTML    = '<div style="height:' + (document.documentElement.clientHeight-4) + 'px;">' + iframe_html + '</div>'
+    }
   }
-  else {
-    // tidy DOM
 
-    const iframe_html = document.querySelector('.video-player-page iframe').outerHTML
+  const max_intervals = Math.ceil(window.videoplayer_poll_timeout_ms / window.videoplayer_poll_interval_ms)
+  let interval_count  = 0
 
-    document.head.innerHTML    = ''
-    document.body.style.margin = '0'
-    document.body.innerHTML    = '<div style="height:' + (document.documentElement.clientHeight-4) + 'px;">' + iframe_html + '</div>'
+  const init_when_ready = function() {
+    const has_player = (typeof jwplayer === 'function')
+    if (!has_player) return
+
+    const is_ready = ((typeof jwplayer().getPlaylistItem === 'function') && jwplayer().getPlaylistItem() && Array.isArray(jwplayer().getPlaylistItem().sources) && jwplayer().getPlaylistItem().sources.length)
+    if (!is_ready) {
+      interval_count++
+
+      if (interval_count <= max_intervals)
+        setTimeout(init_when_ready, window.videoplayer_poll_interval_ms)
+
+      return
+    }
+
+    init()
   }
+
+  init_when_ready()
 }
 
 var get_hash_code = function(str){
@@ -129,6 +155,8 @@ var inject_function = function(_function){
 
 var inject_options = function(){
   var _function = `function(){
+    window.videoplayer_poll_interval_ms = ${user_options['videoplayer_poll_interval_ms']}
+    window.videoplayer_poll_timeout_ms  = ${user_options['videoplayer_poll_timeout_ms']}
     window.redirect_to_webcast_reloaded = ${user_options['redirect_to_webcast_reloaded']}
     window.force_http                   = ${user_options['force_http']}
     window.force_https                  = ${user_options['force_https']}
