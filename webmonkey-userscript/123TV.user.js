@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         TV123
 // @description  Watch videos in external player.
-// @version      3.0.0
+// @version      3.1.0
 // @match        *://123tvnow.com/watch/*
-// @icon         http://123tvnow.com/wp-content/themes/123tv_v2/img/icon.png
+// @match        *://live94today.com/watch/*
+// @icon         http://live94today.com/wp-content/themes/123tv_v2/img/icon.png
 // @run-at       document-end
 // @homepage     https://github.com/warren-bank/crx-123TV/tree/webmonkey-userscript/es5
 // @supportURL   https://github.com/warren-bank/crx-123TV/issues
@@ -14,7 +15,147 @@
 // @copyright    Warren Bank
 // ==/UserScript==
 
-// =============================================================================
+// ----------------------------------------------------------------------------- constants
+
+var user_options = {
+  "redirect_to_webcast_reloaded": true,
+  "force_http":                   true,
+  "force_https":                  false
+}
+
+// ----------------------------------------------------------------------------- URL links to tools on Webcast Reloaded website
+
+var get_webcast_reloaded_url = function(video_url, vtt_url, referer_url, force_http, force_https) {
+  force_http  = (typeof force_http  === 'boolean') ? force_http  : user_options.force_http
+  force_https = (typeof force_https === 'boolean') ? force_https : user_options.force_https
+
+  var encoded_video_url, encoded_vtt_url, encoded_referer_url, webcast_reloaded_base, webcast_reloaded_url
+
+  encoded_video_url     = encodeURIComponent(encodeURIComponent(btoa(video_url)))
+  encoded_vtt_url       = vtt_url ? encodeURIComponent(encodeURIComponent(btoa(vtt_url))) : null
+  referer_url           = referer_url ? referer_url : unsafeWindow.location.href
+  encoded_referer_url   = encodeURIComponent(encodeURIComponent(btoa(referer_url)))
+
+  webcast_reloaded_base = {
+    "https": "https://warren-bank.github.io/crx-webcast-reloaded/external_website/index.html",
+    "http":  "http://webcast-reloaded.surge.sh/index.html"
+  }
+
+  webcast_reloaded_base = (force_http)
+                            ? webcast_reloaded_base.http
+                            : (force_https)
+                               ? webcast_reloaded_base.https
+                               : (video_url.toLowerCase().indexOf('http:') === 0)
+                                  ? webcast_reloaded_base.http
+                                  : webcast_reloaded_base.https
+
+  webcast_reloaded_url  = webcast_reloaded_base + '#/watch/' + encoded_video_url + (encoded_vtt_url ? ('/subtitle/' + encoded_vtt_url) : '') + '/referer/' + encoded_referer_url
+  return webcast_reloaded_url
+}
+
+// ----------------------------------------------------------------------------- URL redirect
+
+var redirect_to_url = function(url) {
+  if (!url) return
+
+  if (typeof GM_loadUrl === 'function') {
+    if (typeof GM_resolveUrl === 'function')
+      url = GM_resolveUrl(url, unsafeWindow.location.href)
+
+    GM_loadUrl(url, 'Referer', unsafeWindow.location.href)
+  }
+  else {
+    try {
+      unsafeWindow.top.location = url
+    }
+    catch(e) {
+      unsafeWindow.window.location = url
+    }
+  }
+}
+
+var process_video_url = function(video_url, video_type, vtt_url, referer_url) {
+  if (!referer_url)
+    referer_url = unsafeWindow.location.href
+
+  if (typeof GM_startIntent === 'function') {
+    // running in Android-WebMonkey: open Intent chooser
+
+    var args = [
+      /* action = */ 'android.intent.action.VIEW',
+      /* data   = */ video_url,
+      /* type   = */ video_type
+    ]
+
+    // extras:
+    if (vtt_url) {
+      args.push('textUrl')
+      args.push(vtt_url)
+    }
+    if (referer_url) {
+      args.push('referUrl')
+      args.push(referer_url)
+    }
+
+    GM_startIntent.apply(this, args)
+    return true
+  }
+  else if (user_options.redirect_to_webcast_reloaded) {
+    // running in standard web browser: redirect URL to top-level tool on Webcast Reloaded website
+
+    redirect_to_url(get_webcast_reloaded_url(video_url, vtt_url, referer_url))
+    return true
+  }
+  else {
+    return false
+  }
+}
+
+var process_hls_url = function(hls_url, vtt_url, referer_url) {
+  return process_video_url(/* video_url= */ hls_url, /* video_type= */ 'application/x-mpegurl', vtt_url, referer_url)
+}
+
+var process_dash_url = function(dash_url, vtt_url, referer_url) {
+  return process_video_url(/* video_url= */ dash_url, /* video_type= */ 'application/dash+xml', vtt_url, referer_url)
+}
+
+// ----------------------------------------------------------------------------- display message
+
+var display_message = function(msg) {
+  if (typeof GM_toastShort === 'function') {
+    // running in Android-WebMonkey: show Toast
+    GM_toastShort(msg)
+  }
+  else {
+    // running in standard web browser: show alert dialog
+    unsafeWindow.alert(msg)
+  }
+}
+
+// ----------------------------------------------------------------------------- update DOM for current channel
+
+var update_page_DOM = function() {
+  var video_player = unsafeWindow.document.getElementById('123tv-player')
+  var channel_epg  = unsafeWindow.document.querySelector('iframe[src*="/epg/"]')
+
+  if (!video_player)
+    return
+
+  unsafeWindow.document.body.innerHTML    = ''
+  unsafeWindow.document.body.style.margin = '0'
+  unsafeWindow.document.body.appendChild(video_player)
+
+  if (channel_epg)
+    unsafeWindow.document.body.appendChild(channel_epg)
+
+  try {
+    unsafeWindow.jwplayer().play()
+  }
+  catch(e){}
+}
+
+// ----------------------------------------------------------------------------- process video for current channel
+
 /*
  * This ES5 variation is intented to be run in older versions of Android (ie: WebKit, Chrome 30).
  * In this context, JW Player fails to initialize.. and the normal method to retrieve the HLS video URL from JW Player also fails.
@@ -22,45 +163,72 @@
  *
  * example:
  * ========
- * page = view-source:http://123tvnow.com/watch/abc/
+ * page = view-source:http://live94today.com/watch/cbs/
  * code:
- *   var _0x49acb3=_0x3b07f1=>{_0x3b07f1=['eyJjaXBoZXJ0ZXh0IjoiRENtQ0dITWdGaUpRbThJWFFRaUVBTVlTSTFrSlJ1bzJiSk1ab0VKTGpBWFlwVlJqRUpGc2YwMHpKMllVUDJ3UWdQNnlsVnNpcFZNQTBzU1o1cmpzNzVPZXU3c25JU00wTFR5WHJXeG8xMjFubkZaTVwvWGk0ZkY1Q09RUkFLWVJ3IiwiaXYiOiJjYWVlMTAzOTlkZDdlNTAxY2IxOTM3MDA4NGQzYW','E3ZiIsInNhbHQiOiI1NjViZTA3YzhiMTNmMjczOTQ0MzQxNDY1NDY0OThjYzJhM2ZmODdiNWY1MjFhMmM5MDczNzY5OGE4ZmQyNzU2NmZjYTdlNzc1OTVkMzM3YTBiZmM0ZTM5OWVmOGFkZTAzOGY4ZDQ3OTIxNWZhNjc1MDE2YWY2NGRkODY1MWE2YmEyNjZlOTE4MWFlZjM0NWEwYjllYmYyNzY1NTg1OTcyMzkzMTRjZWFj','ZDRkYTY3YjJlMmMzYjE4MzdlNWI3Y2E3ZDczMDM0YzA4NThkM2M0MzRhMjNmM2Y5YTRmMzdiMWJkMGE0OWQ2N2QzNjIzYzIzNGRlNWZiNTY4ZjA2MzY5M2MxOWMwZWFkYjdhNjhhZGJkNTk3YjBiZWRjMDA3MWU5Nzk3ZjY5YWQ0YWYwYTI3MjkzODBhZDllMjI4ZmM5Y2M0ZTkzZDE4ODkzMDg5MDUyNmI0ZjBjOTk5MzllNT','U4YmE3NjYwNzA1OWQyZTdmMmUxNGIxZjEyNTY1Zjg0MzRhYjZkMjA4Nzk5YzYyNTZlNWMyNjc3ZTE3OTFiM2MwNzc1MGQ0MTE2NmU3MWNhMWY5YmU3ZGQ1ZTg4NTJjYmNiMTVhMTU2MTNiNzAxM2ZiZTQ2ODk3NTQwMzQxNTdjYjNkMzAyZWQ2N2YyMzJkMGMxNzA3YTFhNmU5N2M5OWViZiIsIml0ZXJhdGlvbnMiOjk5OX0=',''];return _0x3b07f1.join('');}
- *   var _0xdea76=_0xd93475=>{_0x34a189=[101,57,98,51];_0x769cd4=[102,52,100,99];_0xcd4a=[54,49,56,50];_0x685a2e=[55,48,53,97];_0x34a189=_0x34a189.concat(_0x769cd4);_0x34a189=_0x34a189.concat(_0xcd4a);_0xd93475=_0x34a189.concat(_0x685a2e);return _0xd93475.map(e=>String.fromCharCode(e)).reverse().join('');}
- *   var _0x4fce28=E['d'](_0x49acb3('dea9501862'),_0xdea76('81e03c2'));
+ *   var post_id = parseInt($('#'+'v'+'i'+'d'+'eo'+'-i'+'d').val());
+ *   $(document).ready(function(){
+ *
+ *     const _0xe258=_0xd8b497=>{_0xd8b497=['eyJjaXBoZXJ0ZXh0IjoiT1cydVFSNjRrZVRtU0tVOFFka3BqcUhEdTV6dnR5ODJWaytyODVNYnArbVAxQUFWQlZvalZcL0MzWkpyRkdKU2d0WlZUZHZSMmlFUUozNkwwMnJaTFZyRHpFbGROV0dpMkdEa3ByUUd2S2lDbnU5UXdZVldpenBnRkJaUGMrUldMIiwiaXYiOiI0YWRkZTNlMDNiZDFhNDEzMzY5MDZjOTIwZjIzMD','VmMSIsInNhbHQiOiI5NTg5MjAyMGMxYTlhMDI5NWYwMzU0NDNiOTI0MWMzZTU4NzY0N2ZmMTdlZWRhNWE2ODIxNTc0OWZjODliOTNkZDFjN2U1ZmZmYmJjNmY5NzlkOGU4N2QyODQ1NmI5YzY5ZGVlMWM3ODkzMTFkMzU2ZGNmYTZjNjZhMTFmMjY3ODFmMjc5MGRmYWIzM2RmZjU1NGVlMjVhMzU5Y2JjZTY2MzY5YzIwMTYy','NDAzYjI4ZWIzZDFkYmI1ODk2ZmExNDJjNTk0OTU2YmI4ZDdjZjRjN2M4YWM5NWQ2MWYyNDQwNTRhOTM0MWViZjIzZTI4NWQ0YzI4YWUzNDdiYjRlMTk3MTY4ZDdmOTQzMTUzZDlhODM1M2FkYWIyYTcyMzFkMWEwNmFlMmZmYTU1YmJlZDRjMDE0OTQ2MzAwZmQ1Yjk5NWMxZjQ4NjU1MmI4NmI4ZWIyYmFhZTkzZTM4NTFkZD','ZkYmM3ZjEyYzY5MzBjMjEyZTM0Y2JhZjFmOGYyMjA5M2QzNWJkMzUzZGI3ZDQ0Zjk2ZjQ5MGUwM2RjNzY2NTI3YzdiZGJlMzQzMjFjMDRjYmNiNjY1NjJhYjYzOWQ3MmExOWY5NDAwM2MxZmJlYjM1YzE1Zjc4YjcxZTUwY2YwMGIxYjliZGE5MGEzY2JlMWE0Y2NiODc3NTM0NmIyMzlmYiIsIml0ZXJhdGlvbnMiOjk5OX0=',''];return _0xd8b497.join('');};
+ *     var _0x214f=_0x2a804=>{_0x84fe0=[53,48,98,49];_0x6c4b59=[52,102,99,100];_0x31a29=[55,50,54,57];_0xef806d=[56,101,97,51];_0x84fe0=_0x84fe0.concat(_0x6c4b59);_0x84fe0=_0x84fe0.concat(_0x31a29);_0x2a804=_0x84fe0.concat(_0xef806d);return _0x2a804.map(e => String.fromCharCode(e)).reverse().join('');};
+ *     var _0x35d096=_0xcf37=>{const _0x2435f6=E['d'](_0xe258('0d16ca5e'),_0x214f('d02851e9'));if(_0x2435f6.indexOf('get.123tv.live/channel/')==-1){ return [{file:_0x2435f6,type:"hls",title:"CBS",image:"http://live94today.com/wp-content/uploads/2018/09/cbs.png"}];} return _0x2435f6+'?1&json=Q0JTfHxodHRwOi8vbGl2ZTk0dG9kYXkuY29tL3dwLWNvbnRlbnQvdXBsb2Fkcy8yMDE4LzA5L2Nicy5wbmc=';}
+ *
+ *     var options={key: "Vnn7CdANuVWTOVm3s3FoaikdB3wQeM3yDiTG0al5DLuFuLWaWY7UPBzRKV4=",playlist:_0x35d096(),
+ *     //...} ...})
  * result:
- *   _0x4fce28 === 'http://get.123tv.live/channel/6f315272796a396432693734396130494d35776653413d3d/23/abc.m3u8'
+ *   _0x35d096() === 'http://get.123tv.live/channel/67476e67756d3042442f786f52516a3478364e7252513d3d/489/cbs.m3u8?1&json=Q0JTfHxodHRwOi8vbGl2ZTk0dG9kYXkuY29tL3dwLWNvbnRlbnQvdXBsb2Fkcy8yMDE4LzA5L2Nicy5wbmc='
+ *
+ * code w/ patch:
+ *   (function(){
+ *     const _0xe258=_0xd8b497=>{_0xd8b497=['eyJjaXBoZXJ0ZXh0IjoiT1cydVFSNjRrZVRtU0tVOFFka3BqcUhEdTV6dnR5ODJWaytyODVNYnArbVAxQUFWQlZvalZcL0MzWkpyRkdKU2d0WlZUZHZSMmlFUUozNkwwMnJaTFZyRHpFbGROV0dpMkdEa3ByUUd2S2lDbnU5UXdZVldpenBnRkJaUGMrUldMIiwiaXYiOiI0YWRkZTNlMDNiZDFhNDEzMzY5MDZjOTIwZjIzMD','VmMSIsInNhbHQiOiI5NTg5MjAyMGMxYTlhMDI5NWYwMzU0NDNiOTI0MWMzZTU4NzY0N2ZmMTdlZWRhNWE2ODIxNTc0OWZjODliOTNkZDFjN2U1ZmZmYmJjNmY5NzlkOGU4N2QyODQ1NmI5YzY5ZGVlMWM3ODkzMTFkMzU2ZGNmYTZjNjZhMTFmMjY3ODFmMjc5MGRmYWIzM2RmZjU1NGVlMjVhMzU5Y2JjZTY2MzY5YzIwMTYy','NDAzYjI4ZWIzZDFkYmI1ODk2ZmExNDJjNTk0OTU2YmI4ZDdjZjRjN2M4YWM5NWQ2MWYyNDQwNTRhOTM0MWViZjIzZTI4NWQ0YzI4YWUzNDdiYjRlMTk3MTY4ZDdmOTQzMTUzZDlhODM1M2FkYWIyYTcyMzFkMWEwNmFlMmZmYTU1YmJlZDRjMDE0OTQ2MzAwZmQ1Yjk5NWMxZjQ4NjU1MmI4NmI4ZWIyYmFhZTkzZTM4NTFkZD','ZkYmM3ZjEyYzY5MzBjMjEyZTM0Y2JhZjFmOGYyMjA5M2QzNWJkMzUzZGI3ZDQ0Zjk2ZjQ5MGUwM2RjNzY2NTI3YzdiZGJlMzQzMjFjMDRjYmNiNjY1NjJhYjYzOWQ3MmExOWY5NDAwM2MxZmJlYjM1YzE1Zjc4YjcxZTUwY2YwMGIxYjliZGE5MGEzY2JlMWE0Y2NiODc3NTM0NmIyMzlmYiIsIml0ZXJhdGlvbnMiOjk5OX0=',''];return _0xd8b497.join('');};
+ *     var _0x214f=_0x2a804=>{_0x84fe0=[53,48,98,49];_0x6c4b59=[52,102,99,100];_0x31a29=[55,50,54,57];_0xef806d=[56,101,97,51];_0x84fe0=_0x84fe0.concat(_0x6c4b59);_0x84fe0=_0x84fe0.concat(_0x31a29);_0x2a804=_0x84fe0.concat(_0xef806d);return _0x2a804.map(e => String.fromCharCode(e)).reverse().join('');};
+ *     return E['d'](_0xe258('0d16ca5e'),_0x214f('d02851e9'));
+ *   })()
+ * result:
+ *   'http://get.123tv.live/channel/67476e67756d3042442f786f52516a3478364e7252513d3d/489/cbs.m3u8'
+ *
  * however:
  *   - video players refuse to play this manifest
  *   - even ExoAirPlayer doesn't play it, and that's when the Referer header is properly configured
- * test:
- *   curl -H 'Referer: http://123tvnow.com/watch/abc/' 'http://get.123tv.live/channel/6f315272796a396432693734396130494d35776653413d3d/23/abc.m3u8'
+ *
+ * test #1:
+ *   curl -H 'Referer: http://live94today.com/watch/cbs/' 'http://get.123tv.live/channel/67476e67756d3042442f786f52516a3478364e7252513d3d/489/cbs.m3u8?1&json=Q0JTfHxodHRwOi8vbGl2ZTk0dG9kYXkuY29tL3dwLWNvbnRlbnQvdXBsb2Fkcy8yMDE4LzA5L2Nicy5wbmc='
  * result:
- *   'http://hls.123tv.live/ch/nPABQAnsjNp8TzV4YAVMGw/1599132770/abc.m3u8'
+ *   [{"file":"http:\/\/get.123tv.live\/channel\/demo.mp4","title":"123TVNow - Watch Live USA TV","image":"http:\/\/123tvnow.com\/wp-content\/uploads\/2018\/08\/fox-news-1024x576.jpg","type":"mp4"}]
+ *
+ * test #2:
+ *   curl -H 'Referer: http://live94today.com/watch/cbs/' 'http://get.123tv.live/channel/67476e67756d3042442f786f52516a3478364e7252513d3d/489/cbs.m3u8'
+ * result:
+ *   http://get.123tv.live/channel/demo.mp4
  *
  * Consequently, after the javascript is evaluated and the 1st HLS URL is obtained..
  * need to make a second XHR call to resolve the 2nd HSL URL that is able to be played by external video players.
- * Unfortunately, ES5 means that the code will need to be restructured to use a callback.. since Promise and async/await are not available.
  */
 
 var get_hls_url = function(cb) {
   var hls_url = null
   var patterns = {
-    extraction_start: "$(document).ready(function(){var post_id=parseInt($('#video-id').val());",
-    extraction_stop:  ";if(",
+    extraction_start: "var post_id = parseInt($('#'+'v'+'i'+'d'+'eo'+'-i'+'d').val()); $(document).ready(function(){",
+    extraction_stop:  "} var options={",
     replacements: [
       {
-        s: /var [^=]+=[^=]+=>{var [^=]+=(E\['d'\])/,
+        // the purpose of this replacement is to convert ES6 functions to ES5 syntax
+        s: /(const|let) /g,
+        r: 'var '
+      },
+      {
+        // the purpose of this replacement is to unpack the last function and return a URL value
+        s: /var [^=]+\s*=\s*[^=]+\s*=>\s*{var [^=]+\s*=\s*(E\['d'\])/,
         r: 'return $1'
       },
       {
         // the purpose of this replacement is to convert ES6 functions to ES5 syntax
-        s: /([^=]+)=>{/g,
+        s: /([^=]+)\s*=>\s*{/g,
         r: 'function($1){'
       },
       {
         // the purpose of this replacement is to convert ES6 functions to ES5 syntax
-        s: 'e=>String.fromCharCode(e)',
-        r: 'function(e){return String.fromCharCode(e);}'
+        s: /(e)\s*=>\s*(String\.fromCharCode\(e\))/g,
+        r: 'function($1){return $2;}'
       }
     ]
   }
@@ -70,7 +238,7 @@ var get_hls_url = function(cb) {
     scripts = Array.prototype.slice.call(scripts)
 
     for (var i=0; !hls_url && (i < scripts.length); i++) {
-      script = scripts[i].innerText
+      script = scripts[i].innerText.replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ')
 
       index = script.indexOf(patterns.extraction_start)
       if (index < 0) continue
@@ -106,6 +274,12 @@ var resolve_hls_url = function(url, cb) {
     return
   }
 
+  // short-circuit lookup if URL doesn't match pattern
+  if (url.indexOf('://get.') === -1) {
+    cb(url)
+    return
+  }
+
   var xhr = new XMLHttpRequest()
   xhr.open('GET', url, true)
   xhr.onload = function() {
@@ -116,50 +290,43 @@ var resolve_hls_url = function(url, cb) {
     )
     xhr.abort()
   }
+  xhr.onerror = function(e) {
+    cb(url)
+    xhr.abort()
+  }
   xhr.send()
 }
 
-// =============================================================================
+// -----------------------------------------------------------------------------
 
 var get_referer_url = function() {
   var referer_url
   try {
-    referer_url = window.top.location.href
+    referer_url = unsafeWindow.top.location.href
   }
   catch(e) {
-    referer_url = window.location.href
+    referer_url = unsafeWindow.location.href
   }
   return referer_url
 }
 
-// =============================================================================
-
 var process_page = function(show_error, cb) {
   get_hls_url(function(hls_url){
     if (hls_url) {
-      var extras = ['referUrl', get_referer_url()]
+      var did_redirect = process_hls_url(hls_url)
 
-      var args = [
-        'android.intent.action.VIEW',  /* action */
-        hls_url,                       /* data   */
-        'application/x-mpegurl'        /* type   */
-      ]
-
-      for (var i=0; i < extras.length; i++) {
-        args.push(extras[i])
-      }
-
-      GM_startIntent.apply(this, args)
+      if (!did_redirect)
+        update_page_DOM()
     }
     else if (show_error) {
-      GM_toastShort('video not found')
+      display_message('video not found')
     }
 
     cb(!!hls_url)
   })
 }
 
-// =============================================================================
+// ----------------------------------------------------------------------------- bootstrap: wait 1 sec after each failed attempt; timeout after 15x failed attempts
 
 var init = function() {
   process_page(false, function(success){
@@ -167,9 +334,9 @@ var init = function() {
 
     if (!success) {
       count = 15
-      timer = window.setInterval(
+      timer = unsafeWindow.setInterval(
         function() {
-          if (count <= 1) window.clearInterval(timer)
+          if (count <= 1) unsafeWindow.clearInterval(timer)
           if (count <= 0) return
 
           process_page((count === 1), function(success){
@@ -185,6 +352,6 @@ var init = function() {
   })
 }
 
-// =============================================================================
-
 init()
+
+// -----------------------------------------------------------------------------
